@@ -2,7 +2,10 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
+	"gopkg.in/yaml.v3"
+	"io/ioutil"
 	"log"
 	"math/rand"
 	"os"
@@ -11,7 +14,7 @@ import (
 	"time"
 )
 
-func configDir() string {
+func configFile() string {
 	dir, err := os.UserConfigDir()
 	if nil != err {
 		log.Fatal("Could not get user config dir", err)
@@ -33,9 +36,9 @@ type Args struct {
 
 func parseArgs() Args {
 	args := Args{
-		Dict:         DefaultDictionary,
-		Length:       "*",
-		RegexpLength: "*",
+		Dict:         "",
+		Length:       "",
+		RegexpLength: "",
 		Skip:         "",
 		Include:      "",
 		Match:        "",
@@ -51,15 +54,73 @@ func parseArgs() Args {
 
 	flag.Parse()
 
+	return args
+}
+
+type Config struct {
+	Dict   string `yaml:"dictionary"`
+	Length string `yaml:"length"`
+}
+
+func viaConfigFile(args Args) Args {
+	file := configFile()
+	if _, err := os.Stat(file); err == nil {
+		config := Config{}
+		yml, ierr := ioutil.ReadFile(file)
+		if nil != ierr {
+			log.Printf("Could not read config file %s", file)
+			log.Print(err)
+		} else {
+			_ = yaml.Unmarshal(yml, &config)
+			if "" == args.Dict {
+				args.Dict = config.Dict
+			}
+			if "" == args.Length {
+				args.Length = config.Length
+			}
+		}
+	}
+	return args
+}
+
+func sanitise(args Args) Args {
+	if "" == args.Dict {
+		args.Dict = DefaultDictionary
+	}
+
+	if "" == args.Length {
+		args.Length = "*"
+	}
+
 	if "*" != args.Length {
 		args.RegexpLength = "{" + args.Length + "}"
+	} else {
+		args.RegexpLength = args.Length
 	}
 
 	return args
 }
 
+func maybeSave(args Args) {
+	file := configFile()
+	if _, err := os.Stat(file); err != nil && errors.Is(err, os.ErrNotExist) {
+		config := Config{
+			Dict:   args.Dict,
+			Length: args.Length,
+		}
+		data, _ := yaml.Marshal(config)
+		if ierr := ioutil.WriteFile(file, data, 0600); ierr != nil {
+			log.Printf("Could not save config file %s", file)
+			log.Print(ierr)
+		}
+	}
+}
+
 func main() {
-	args := parseArgs()
+
+	args := sanitise(viaConfigFile(parseArgs()))
+
+	maybeSave(args)
 
 	file, err := os.Open(args.Dict)
 
